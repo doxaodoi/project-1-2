@@ -1,7 +1,7 @@
 # CPEN 208 — Projects 1 & 2 · CoE Department System
 
 **David Kwame Odoi-Anim — 22312110**
-University of Ghana · Department of Computer Engineering · First Semester 2025/2026
+University of Ghana · Department of Computer Engineering · Second Semester 2025/2026
 
 A relational database plus a full-stack web application for a Computer Engineering
 Department: student information, fees & payments, course enrollment, and
