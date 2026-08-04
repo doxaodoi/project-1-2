@@ -1,0 +1,21 @@
+# ---- Node / Next.js (PROJECT 1/web) ----
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---- Environment files (never commit secrets) ----
+.env
+.env.local
+.env*.local
+
+# ---- Java / Maven (PROJECT 2/api) ----
+target/
+*.class
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,1945 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict pdy11iDIhsnnESQWhWhuVR2MLYqSauJVzXGuwwB5xDt3dsrksUjUqYXrgwLAhT2
+
+-- Dumped from database version 18.1
+-- Dumped by pg_dump version 18.1
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: academic; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA academic;
+
+
+ALTER SCHEMA academic OWNER TO postgres;
+
+--
+-- Name: SCHEMA academic; Type: COMMENT; Schema: -; Owner: postgres
+--
+
+COMMENT ON SCHEMA academic IS 'Courses, enrollments, lecturer/TA assignments.';
+
+
+--
+-- Name: auth; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA auth;
+
+
+ALTER SCHEMA auth OWNER TO postgres;
+
+--
+-- Name: SCHEMA auth; Type: COMMENT; Schema: -; Owner: postgres
+--
+
+COMMENT ON SCHEMA auth IS 'Login accounts for the Next.js frontend / Spring Boot API.';
+
+
+--
+-- Name: finance; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA finance;
+
+
+ALTER SCHEMA finance OWNER TO postgres;
+
+--
+-- Name: SCHEMA finance; Type: COMMENT; Schema: -; Owner: postgres
+--
+
+COMMENT ON SCHEMA finance IS 'Fee bills, payments and outstanding-fee calculations.';
+
+
+--
+-- Name: people; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA people;
+
+
+ALTER SCHEMA people OWNER TO postgres;
+
+--
+-- Name: SCHEMA people; Type: COMMENT; Schema: -; Owner: postgres
+--
+
+COMMENT ON SCHEMA people IS 'Persons: students, lecturers, teaching assistants.';
+
+
+--
+-- Name: get_outstanding_fees(); Type: FUNCTION; Schema: finance; Owner: postgres
+--
+
+CREATE FUNCTION finance.get_outstanding_fees() RETURNS json
+    LANGUAGE sql STABLE
+    AS $$
+    SELECT COALESCE(json_agg(row_to_json(t) ORDER BY t.full_name), '[]'::json)
+    FROM (
+        SELECT
+            s.student_id,
+            s.full_name,
+            s.email,
+            COALESCE(b.total_billed, 0)                       AS total_billed,
+            COALESCE(p.total_paid, 0)                         AS total_paid,
+            COALESCE(b.total_billed, 0) - COALESCE(p.total_paid, 0) AS outstanding
+        FROM people.students s
+        LEFT JOIN (
+            SELECT student_id, SUM(amount_due) AS total_billed
+            FROM finance.fee_bills
+            GROUP BY student_id
+        ) b ON b.student_id = s.student_id
+        LEFT JOIN (
+            SELECT student_id, SUM(amount) AS total_paid
+            FROM finance.payments
+            GROUP BY student_id
+        ) p ON p.student_id = s.student_id
+    ) t;
+$$;
+
+
+ALTER FUNCTION finance.get_outstanding_fees() OWNER TO postgres;
+
+--
+-- Name: FUNCTION get_outstanding_fees(); Type: COMMENT; Schema: finance; Owner: postgres
+--
+
+COMMENT ON FUNCTION finance.get_outstanding_fees() IS 'Returns a JSON array of every student''s billed, paid and outstanding fees.';
+
+
+--
+-- Name: get_student_outstanding(bigint); Type: FUNCTION; Schema: finance; Owner: postgres
+--
+
+CREATE FUNCTION finance.get_student_outstanding(p_student_id bigint) RETURNS numeric
+    LANGUAGE sql STABLE
+    AS $$
+    SELECT
+        COALESCE((SELECT SUM(amount_due) FROM finance.fee_bills
+                  WHERE student_id = p_student_id), 0)
+      - COALESCE((SELECT SUM(amount)     FROM finance.payments
+                  WHERE student_id = p_student_id), 0);
+$$;
+
+
+ALTER FUNCTION finance.get_student_outstanding(p_student_id bigint) OWNER TO postgres;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: courses; Type: TABLE; Schema: academic; Owner: postgres
+--
+
+CREATE TABLE academic.courses (
+    course_id integer NOT NULL,
+    code character varying(15) NOT NULL,
+    title character varying(150) NOT NULL,
+    credit_hours smallint DEFAULT 3 NOT NULL,
+    level smallint NOT NULL,
+    semester smallint NOT NULL,
+    CONSTRAINT courses_semester_check CHECK ((semester = ANY (ARRAY[1, 2])))
+);
+
+
+ALTER TABLE academic.courses OWNER TO postgres;
+
+--
+-- Name: courses_course_id_seq; Type: SEQUENCE; Schema: academic; Owner: postgres
+--
+
+CREATE SEQUENCE academic.courses_course_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE academic.courses_course_id_seq OWNER TO postgres;
+
+--
+-- Name: courses_course_id_seq; Type: SEQUENCE OWNED BY; Schema: academic; Owner: postgres
+--
+
+ALTER SEQUENCE academic.courses_course_id_seq OWNED BY academic.courses.course_id;
+
+
+--
+-- Name: enrollments; Type: TABLE; Schema: academic; Owner: postgres
+--
+
+CREATE TABLE academic.enrollments (
+    enrollment_id integer NOT NULL,
+    student_id bigint NOT NULL,
+    course_id integer NOT NULL,
+    academic_year character varying(9) NOT NULL,
+    semester smallint NOT NULL,
+    grade character varying(2),
+    enrolled_on date DEFAULT CURRENT_DATE NOT NULL,
+    CONSTRAINT enrollments_semester_check CHECK ((semester = ANY (ARRAY[1, 2])))
+);
+
+
+ALTER TABLE academic.enrollments OWNER TO postgres;
+
+--
+-- Name: enrollments_enrollment_id_seq; Type: SEQUENCE; Schema: academic; Owner: postgres
+--
+
+CREATE SEQUENCE academic.enrollments_enrollment_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE academic.enrollments_enrollment_id_seq OWNER TO postgres;
+
+--
+-- Name: enrollments_enrollment_id_seq; Type: SEQUENCE OWNED BY; Schema: academic; Owner: postgres
+--
+
+ALTER SEQUENCE academic.enrollments_enrollment_id_seq OWNED BY academic.enrollments.enrollment_id;
+
+
+--
+-- Name: lecturer_course_assignment; Type: TABLE; Schema: academic; Owner: postgres
+--
+
+CREATE TABLE academic.lecturer_course_assignment (
+    assignment_id integer NOT NULL,
+    lecturer_id integer NOT NULL,
+    course_id integer NOT NULL,
+    academic_year character varying(9) NOT NULL,
+    semester smallint NOT NULL,
+    CONSTRAINT lecturer_course_assignment_semester_check CHECK ((semester = ANY (ARRAY[1, 2])))
+);
+
+
+ALTER TABLE academic.lecturer_course_assignment OWNER TO postgres;
+
+--
+-- Name: lecturer_course_assignment_assignment_id_seq; Type: SEQUENCE; Schema: academic; Owner: postgres
+--
+
+CREATE SEQUENCE academic.lecturer_course_assignment_assignment_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE academic.lecturer_course_assignment_assignment_id_seq OWNER TO postgres;
+
+--
+-- Name: lecturer_course_assignment_assignment_id_seq; Type: SEQUENCE OWNED BY; Schema: academic; Owner: postgres
+--
+
+ALTER SEQUENCE academic.lecturer_course_assignment_assignment_id_seq OWNED BY academic.lecturer_course_assignment.assignment_id;
+
+
+--
+-- Name: lecturer_ta_assignment; Type: TABLE; Schema: academic; Owner: postgres
+--
+
+CREATE TABLE academic.lecturer_ta_assignment (
+    assignment_id integer NOT NULL,
+    lecturer_id integer NOT NULL,
+    ta_id integer NOT NULL,
+    course_id integer NOT NULL,
+    academic_year character varying(9) NOT NULL
+);
+
+
+ALTER TABLE academic.lecturer_ta_assignment OWNER TO postgres;
+
+--
+-- Name: lecturer_ta_assignment_assignment_id_seq; Type: SEQUENCE; Schema: academic; Owner: postgres
+--
+
+CREATE SEQUENCE academic.lecturer_ta_assignment_assignment_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE academic.lecturer_ta_assignment_assignment_id_seq OWNER TO postgres;
+
+--
+-- Name: lecturer_ta_assignment_assignment_id_seq; Type: SEQUENCE OWNED BY; Schema: academic; Owner: postgres
+--
+
+ALTER SEQUENCE academic.lecturer_ta_assignment_assignment_id_seq OWNED BY academic.lecturer_ta_assignment.assignment_id;
+
+
+--
+-- Name: users; Type: TABLE; Schema: auth; Owner: postgres
+--
+
+CREATE TABLE auth.users (
+    user_id integer NOT NULL,
+    student_id bigint NOT NULL,
+    email character varying(150) NOT NULL,
+    password_hash character varying(100) NOT NULL,
+    role character varying(20) DEFAULT 'STUDENT'::character varying NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE auth.users OWNER TO postgres;
+
+--
+-- Name: users_user_id_seq; Type: SEQUENCE; Schema: auth; Owner: postgres
+--
+
+CREATE SEQUENCE auth.users_user_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE auth.users_user_id_seq OWNER TO postgres;
+
+--
+-- Name: users_user_id_seq; Type: SEQUENCE OWNED BY; Schema: auth; Owner: postgres
+--
+
+ALTER SEQUENCE auth.users_user_id_seq OWNED BY auth.users.user_id;
+
+
+--
+-- Name: fee_bills; Type: TABLE; Schema: finance; Owner: postgres
+--
+
+CREATE TABLE finance.fee_bills (
+    bill_id integer NOT NULL,
+    student_id bigint NOT NULL,
+    academic_year character varying(9) NOT NULL,
+    semester smallint NOT NULL,
+    description character varying(120) NOT NULL,
+    amount_due numeric(12,2) NOT NULL,
+    billed_on date DEFAULT CURRENT_DATE NOT NULL,
+    CONSTRAINT fee_bills_amount_due_check CHECK ((amount_due >= (0)::numeric)),
+    CONSTRAINT fee_bills_semester_check CHECK ((semester = ANY (ARRAY[1, 2])))
+);
+
+
+ALTER TABLE finance.fee_bills OWNER TO postgres;
+
+--
+-- Name: fee_bills_bill_id_seq; Type: SEQUENCE; Schema: finance; Owner: postgres
+--
+
+CREATE SEQUENCE finance.fee_bills_bill_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE finance.fee_bills_bill_id_seq OWNER TO postgres;
+
+--
+-- Name: fee_bills_bill_id_seq; Type: SEQUENCE OWNED BY; Schema: finance; Owner: postgres
+--
+
+ALTER SEQUENCE finance.fee_bills_bill_id_seq OWNED BY finance.fee_bills.bill_id;
+
+
+--
+-- Name: payments; Type: TABLE; Schema: finance; Owner: postgres
+--
+
+CREATE TABLE finance.payments (
+    payment_id integer NOT NULL,
+    student_id bigint NOT NULL,
+    amount numeric(12,2) NOT NULL,
+    paid_on date DEFAULT CURRENT_DATE NOT NULL,
+    method character varying(30) DEFAULT 'BANK'::character varying NOT NULL,
+    reference character varying(60),
+    CONSTRAINT payments_amount_check CHECK ((amount > (0)::numeric))
+);
+
+
+ALTER TABLE finance.payments OWNER TO postgres;
+
+--
+-- Name: payments_payment_id_seq; Type: SEQUENCE; Schema: finance; Owner: postgres
+--
+
+CREATE SEQUENCE finance.payments_payment_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE finance.payments_payment_id_seq OWNER TO postgres;
+
+--
+-- Name: payments_payment_id_seq; Type: SEQUENCE OWNED BY; Schema: finance; Owner: postgres
+--
+
+ALTER SEQUENCE finance.payments_payment_id_seq OWNED BY finance.payments.payment_id;
+
+
+--
+-- Name: lecturers; Type: TABLE; Schema: people; Owner: postgres
+--
+
+CREATE TABLE people.lecturers (
+    lecturer_id integer NOT NULL,
+    staff_no character varying(20) NOT NULL,
+    title character varying(20),
+    full_name character varying(150) NOT NULL,
+    email character varying(150) NOT NULL,
+    academic_rank character varying(60),
+    phone character varying(20)
+);
+
+
+ALTER TABLE people.lecturers OWNER TO postgres;
+
+--
+-- Name: lecturers_lecturer_id_seq; Type: SEQUENCE; Schema: people; Owner: postgres
+--
+
+CREATE SEQUENCE people.lecturers_lecturer_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE people.lecturers_lecturer_id_seq OWNER TO postgres;
+
+--
+-- Name: lecturers_lecturer_id_seq; Type: SEQUENCE OWNED BY; Schema: people; Owner: postgres
+--
+
+ALTER SEQUENCE people.lecturers_lecturer_id_seq OWNED BY people.lecturers.lecturer_id;
+
+
+--
+-- Name: programs; Type: TABLE; Schema: people; Owner: postgres
+--
+
+CREATE TABLE people.programs (
+    program_id integer NOT NULL,
+    code character varying(20) NOT NULL,
+    name character varying(120) NOT NULL,
+    degree character varying(60) NOT NULL,
+    duration_years smallint DEFAULT 4 NOT NULL
+);
+
+
+ALTER TABLE people.programs OWNER TO postgres;
+
+--
+-- Name: programs_program_id_seq; Type: SEQUENCE; Schema: people; Owner: postgres
+--
+
+CREATE SEQUENCE people.programs_program_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE people.programs_program_id_seq OWNER TO postgres;
+
+--
+-- Name: programs_program_id_seq; Type: SEQUENCE OWNED BY; Schema: people; Owner: postgres
+--
+
+ALTER SEQUENCE people.programs_program_id_seq OWNED BY people.programs.program_id;
+
+
+--
+-- Name: students; Type: TABLE; Schema: people; Owner: postgres
+--
+
+CREATE TABLE people.students (
+    student_id bigint NOT NULL,
+    full_name character varying(150) NOT NULL,
+    email character varying(150) NOT NULL,
+    phone character varying(20),
+    date_of_birth date,
+    gender character varying(20),
+    level smallint DEFAULT 400 NOT NULL,
+    program_id integer NOT NULL,
+    enrolled_on date DEFAULT CURRENT_DATE NOT NULL
+);
+
+
+ALTER TABLE people.students OWNER TO postgres;
+
+--
+-- Name: teaching_assistants; Type: TABLE; Schema: people; Owner: postgres
+--
+
+CREATE TABLE people.teaching_assistants (
+    ta_id integer NOT NULL,
+    full_name character varying(150) NOT NULL,
+    email character varying(150) NOT NULL,
+    student_id bigint
+);
+
+
+ALTER TABLE people.teaching_assistants OWNER TO postgres;
+
+--
+-- Name: teaching_assistants_ta_id_seq; Type: SEQUENCE; Schema: people; Owner: postgres
+--
+
+CREATE SEQUENCE people.teaching_assistants_ta_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE people.teaching_assistants_ta_id_seq OWNER TO postgres;
+
+--
+-- Name: teaching_assistants_ta_id_seq; Type: SEQUENCE OWNED BY; Schema: people; Owner: postgres
+--
+
+ALTER SEQUENCE people.teaching_assistants_ta_id_seq OWNED BY people.teaching_assistants.ta_id;
+
+
+--
+-- Name: courses course_id; Type: DEFAULT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.courses ALTER COLUMN course_id SET DEFAULT nextval('academic.courses_course_id_seq'::regclass);
+
+
+--
+-- Name: enrollments enrollment_id; Type: DEFAULT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.enrollments ALTER COLUMN enrollment_id SET DEFAULT nextval('academic.enrollments_enrollment_id_seq'::regclass);
+
+
+--
+-- Name: lecturer_course_assignment assignment_id; Type: DEFAULT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_course_assignment ALTER COLUMN assignment_id SET DEFAULT nextval('academic.lecturer_course_assignment_assignment_id_seq'::regclass);
+
+
+--
+-- Name: lecturer_ta_assignment assignment_id; Type: DEFAULT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_ta_assignment ALTER COLUMN assignment_id SET DEFAULT nextval('academic.lecturer_ta_assignment_assignment_id_seq'::regclass);
+
+
+--
+-- Name: users user_id; Type: DEFAULT; Schema: auth; Owner: postgres
+--
+
+ALTER TABLE ONLY auth.users ALTER COLUMN user_id SET DEFAULT nextval('auth.users_user_id_seq'::regclass);
+
+
+--
+-- Name: fee_bills bill_id; Type: DEFAULT; Schema: finance; Owner: postgres
+--
+
+ALTER TABLE ONLY finance.fee_bills ALTER COLUMN bill_id SET DEFAULT nextval('finance.fee_bills_bill_id_seq'::regclass);
+
+
+--
+-- Name: payments payment_id; Type: DEFAULT; Schema: finance; Owner: postgres
+--
+
+ALTER TABLE ONLY finance.payments ALTER COLUMN payment_id SET DEFAULT nextval('finance.payments_payment_id_seq'::regclass);
+
+
+--
+-- Name: lecturers lecturer_id; Type: DEFAULT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.lecturers ALTER COLUMN lecturer_id SET DEFAULT nextval('people.lecturers_lecturer_id_seq'::regclass);
+
+
+--
+-- Name: programs program_id; Type: DEFAULT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.programs ALTER COLUMN program_id SET DEFAULT nextval('people.programs_program_id_seq'::regclass);
+
+
+--
+-- Name: teaching_assistants ta_id; Type: DEFAULT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.teaching_assistants ALTER COLUMN ta_id SET DEFAULT nextval('people.teaching_assistants_ta_id_seq'::regclass);
+
+
+--
+-- Data for Name: courses; Type: TABLE DATA; Schema: academic; Owner: postgres
+--
+
+COPY academic.courses (course_id, code, title, credit_hours, level, semester) FROM stdin;
+1	CPEN 208	Introduction to Software Engineering	3	200	1
+2	CPEN 202	Object Oriented Programming	3	200	1
+3	CPEN 204	Data Structures and Algorithms	3	200	1
+4	CPEN 206	Linear Circuits	3	200	1
+5	CPEN 210	Digital Logic Design	3	200	1
+6	MATH 223	Multivariable Calculus	3	200	1
+7	UGRC 210	Academic Writing II	3	200	1
+\.
+
+
+--
+-- Data for Name: enrollments; Type: TABLE DATA; Schema: academic; Owner: postgres
+--
+
+COPY academic.enrollments (enrollment_id, student_id, course_id, academic_year, semester, grade, enrolled_on) FROM stdin;
+1	22384451	1	2025/2026	1	\N	2026-08-04
+2	22384451	2	2025/2026	1	\N	2026-08-04
+3	22384451	3	2025/2026	1	\N	2026-08-04
+4	22384451	4	2025/2026	1	\N	2026-08-04
+5	22384451	5	2025/2026	1	\N	2026-08-04
+6	22384451	6	2025/2026	1	\N	2026-08-04
+7	22357814	1	2025/2026	1	\N	2026-08-04
+8	22357814	2	2025/2026	1	\N	2026-08-04
+9	22357814	3	2025/2026	1	\N	2026-08-04
+10	22357814	4	2025/2026	1	\N	2026-08-04
+11	22357814	5	2025/2026	1	\N	2026-08-04
+12	22357814	6	2025/2026	1	\N	2026-08-04
+13	22375367	1	2025/2026	1	\N	2026-08-04
+14	22375367	2	2025/2026	1	\N	2026-08-04
+15	22375367	3	2025/2026	1	\N	2026-08-04
+16	22375367	4	2025/2026	1	\N	2026-08-04
+17	22375367	5	2025/2026	1	\N	2026-08-04
+18	22375367	6	2025/2026	1	\N	2026-08-04
+19	22397756	1	2025/2026	1	\N	2026-08-04
+20	22397756	2	2025/2026	1	\N	2026-08-04
+21	22397756	3	2025/2026	1	\N	2026-08-04
+22	22397756	4	2025/2026	1	\N	2026-08-04
+23	22397756	5	2025/2026	1	\N	2026-08-04
+24	22397756	6	2025/2026	1	\N	2026-08-04
+25	22369321	1	2025/2026	1	\N	2026-08-04
+26	22369321	2	2025/2026	1	\N	2026-08-04
+27	22369321	3	2025/2026	1	\N	2026-08-04
+28	22369321	4	2025/2026	1	\N	2026-08-04
+29	22369321	5	2025/2026	1	\N	2026-08-04
+30	22369321	6	2025/2026	1	\N	2026-08-04
+31	22301848	1	2025/2026	1	\N	2026-08-04
+32	22301848	2	2025/2026	1	\N	2026-08-04
+33	22301848	3	2025/2026	1	\N	2026-08-04
+34	22301848	4	2025/2026	1	\N	2026-08-04
+35	22301848	5	2025/2026	1	\N	2026-08-04
+36	22301848	6	2025/2026	1	\N	2026-08-04
+37	22339520	1	2025/2026	1	\N	2026-08-04
+38	22339520	2	2025/2026	1	\N	2026-08-04
+39	22339520	3	2025/2026	1	\N	2026-08-04
+40	22339520	4	2025/2026	1	\N	2026-08-04
+41	22339520	5	2025/2026	1	\N	2026-08-04
+42	22339520	6	2025/2026	1	\N	2026-08-04
+43	22333597	1	2025/2026	1	\N	2026-08-04
+44	22333597	2	2025/2026	1	\N	2026-08-04
+45	22333597	3	2025/2026	1	\N	2026-08-04
+46	22333597	4	2025/2026	1	\N	2026-08-04
+47	22333597	5	2025/2026	1	\N	2026-08-04
+48	22333597	6	2025/2026	1	\N	2026-08-04
+49	22268986	1	2025/2026	1	\N	2026-08-04
+50	22268986	2	2025/2026	1	\N	2026-08-04
+51	22268986	3	2025/2026	1	\N	2026-08-04
+52	22268986	4	2025/2026	1	\N	2026-08-04
+53	22268986	5	2025/2026	1	\N	2026-08-04
+54	22268986	6	2025/2026	1	\N	2026-08-04
+55	22381577	1	2025/2026	1	\N	2026-08-04
+56	22381577	2	2025/2026	1	\N	2026-08-04
+57	22381577	3	2025/2026	1	\N	2026-08-04
+58	22381577	4	2025/2026	1	\N	2026-08-04
+59	22381577	5	2025/2026	1	\N	2026-08-04
+60	22381577	6	2025/2026	1	\N	2026-08-04
+61	22315830	1	2025/2026	1	\N	2026-08-04
+62	22315830	2	2025/2026	1	\N	2026-08-04
+63	22315830	3	2025/2026	1	\N	2026-08-04
+64	22315830	4	2025/2026	1	\N	2026-08-04
+65	22315830	5	2025/2026	1	\N	2026-08-04
+66	22315830	6	2025/2026	1	\N	2026-08-04
+67	22388189	1	2025/2026	1	\N	2026-08-04
+68	22388189	2	2025/2026	1	\N	2026-08-04
+69	22388189	3	2025/2026	1	\N	2026-08-04
+70	22388189	4	2025/2026	1	\N	2026-08-04
+71	22388189	5	2025/2026	1	\N	2026-08-04
+72	22388189	6	2025/2026	1	\N	2026-08-04
+73	22393520	1	2025/2026	1	\N	2026-08-04
+74	22393520	2	2025/2026	1	\N	2026-08-04
+75	22393520	3	2025/2026	1	\N	2026-08-04
+76	22393520	4	2025/2026	1	\N	2026-08-04
+77	22393520	5	2025/2026	1	\N	2026-08-04
+78	22393520	6	2025/2026	1	\N	2026-08-04
+79	22312110	1	2025/2026	1	\N	2026-08-04
+80	22312110	2	2025/2026	1	\N	2026-08-04
+81	22312110	3	2025/2026	1	\N	2026-08-04
+82	22312110	4	2025/2026	1	\N	2026-08-04
+83	22312110	5	2025/2026	1	\N	2026-08-04
+84	22312110	6	2025/2026	1	\N	2026-08-04
+85	22300896	1	2025/2026	1	\N	2026-08-04
+86	22300896	2	2025/2026	1	\N	2026-08-04
+87	22300896	3	2025/2026	1	\N	2026-08-04
+88	22300896	4	2025/2026	1	\N	2026-08-04
+89	22300896	5	2025/2026	1	\N	2026-08-04
+90	22300896	6	2025/2026	1	\N	2026-08-04
+91	22397491	1	2025/2026	1	\N	2026-08-04
+92	22397491	2	2025/2026	1	\N	2026-08-04
+93	22397491	3	2025/2026	1	\N	2026-08-04
+94	22397491	4	2025/2026	1	\N	2026-08-04
+95	22397491	5	2025/2026	1	\N	2026-08-04
+96	22397491	6	2025/2026	1	\N	2026-08-04
+97	22387715	1	2025/2026	1	\N	2026-08-04
+98	22387715	2	2025/2026	1	\N	2026-08-04
+99	22387715	3	2025/2026	1	\N	2026-08-04
+100	22387715	4	2025/2026	1	\N	2026-08-04
+101	22387715	5	2025/2026	1	\N	2026-08-04
+102	22387715	6	2025/2026	1	\N	2026-08-04
+103	22382302	1	2025/2026	1	\N	2026-08-04
+104	22382302	2	2025/2026	1	\N	2026-08-04
+105	22382302	3	2025/2026	1	\N	2026-08-04
+106	22382302	4	2025/2026	1	\N	2026-08-04
+107	22382302	5	2025/2026	1	\N	2026-08-04
+108	22382302	6	2025/2026	1	\N	2026-08-04
+109	22379061	1	2025/2026	1	\N	2026-08-04
+110	22379061	2	2025/2026	1	\N	2026-08-04
+111	22379061	3	2025/2026	1	\N	2026-08-04
+112	22379061	4	2025/2026	1	\N	2026-08-04
+113	22379061	5	2025/2026	1	\N	2026-08-04
+114	22379061	6	2025/2026	1	\N	2026-08-04
+115	22368809	1	2025/2026	1	\N	2026-08-04
+116	22368809	2	2025/2026	1	\N	2026-08-04
+117	22368809	3	2025/2026	1	\N	2026-08-04
+118	22368809	4	2025/2026	1	\N	2026-08-04
+119	22368809	5	2025/2026	1	\N	2026-08-04
+120	22368809	6	2025/2026	1	\N	2026-08-04
+121	22370498	1	2025/2026	1	\N	2026-08-04
+122	22370498	2	2025/2026	1	\N	2026-08-04
+123	22370498	3	2025/2026	1	\N	2026-08-04
+124	22370498	4	2025/2026	1	\N	2026-08-04
+125	22370498	5	2025/2026	1	\N	2026-08-04
+126	22370498	6	2025/2026	1	\N	2026-08-04
+127	22382425	1	2025/2026	1	\N	2026-08-04
+128	22382425	2	2025/2026	1	\N	2026-08-04
+129	22382425	3	2025/2026	1	\N	2026-08-04
+130	22382425	4	2025/2026	1	\N	2026-08-04
+131	22382425	5	2025/2026	1	\N	2026-08-04
+132	22382425	6	2025/2026	1	\N	2026-08-04
+133	22396551	1	2025/2026	1	\N	2026-08-04
+134	22396551	2	2025/2026	1	\N	2026-08-04
+135	22396551	3	2025/2026	1	\N	2026-08-04
+136	22396551	4	2025/2026	1	\N	2026-08-04
+137	22396551	5	2025/2026	1	\N	2026-08-04
+138	22396551	6	2025/2026	1	\N	2026-08-04
+139	22398562	1	2025/2026	1	\N	2026-08-04
+140	22398562	2	2025/2026	1	\N	2026-08-04
+141	22398562	3	2025/2026	1	\N	2026-08-04
+142	22398562	4	2025/2026	1	\N	2026-08-04
+143	22398562	5	2025/2026	1	\N	2026-08-04
+144	22398562	6	2025/2026	1	\N	2026-08-04
+145	22398596	1	2025/2026	1	\N	2026-08-04
+146	22398596	2	2025/2026	1	\N	2026-08-04
+147	22398596	3	2025/2026	1	\N	2026-08-04
+148	22398596	4	2025/2026	1	\N	2026-08-04
+149	22398596	5	2025/2026	1	\N	2026-08-04
+150	22398596	6	2025/2026	1	\N	2026-08-04
+151	22385323	1	2025/2026	1	\N	2026-08-04
+152	22385323	2	2025/2026	1	\N	2026-08-04
+153	22385323	3	2025/2026	1	\N	2026-08-04
+154	22385323	4	2025/2026	1	\N	2026-08-04
+155	22385323	5	2025/2026	1	\N	2026-08-04
+156	22385323	6	2025/2026	1	\N	2026-08-04
+157	22303421	1	2025/2026	1	\N	2026-08-04
+158	22303421	2	2025/2026	1	\N	2026-08-04
+159	22303421	3	2025/2026	1	\N	2026-08-04
+160	22303421	4	2025/2026	1	\N	2026-08-04
+161	22303421	5	2025/2026	1	\N	2026-08-04
+162	22303421	6	2025/2026	1	\N	2026-08-04
+163	22407033	1	2025/2026	1	\N	2026-08-04
+164	22407033	2	2025/2026	1	\N	2026-08-04
+165	22407033	3	2025/2026	1	\N	2026-08-04
+166	22407033	4	2025/2026	1	\N	2026-08-04
+167	22407033	5	2025/2026	1	\N	2026-08-04
+168	22407033	6	2025/2026	1	\N	2026-08-04
+169	22299189	1	2025/2026	1	\N	2026-08-04
+170	22299189	2	2025/2026	1	\N	2026-08-04
+171	22299189	3	2025/2026	1	\N	2026-08-04
+172	22299189	4	2025/2026	1	\N	2026-08-04
+173	22299189	5	2025/2026	1	\N	2026-08-04
+174	22299189	6	2025/2026	1	\N	2026-08-04
+175	22407837	1	2025/2026	1	\N	2026-08-04
+176	22407837	2	2025/2026	1	\N	2026-08-04
+177	22407837	3	2025/2026	1	\N	2026-08-04
+178	22407837	4	2025/2026	1	\N	2026-08-04
+179	22407837	5	2025/2026	1	\N	2026-08-04
+180	22407837	6	2025/2026	1	\N	2026-08-04
+181	22412615	1	2025/2026	1	\N	2026-08-04
+182	22412615	2	2025/2026	1	\N	2026-08-04
+183	22412615	3	2025/2026	1	\N	2026-08-04
+184	22412615	4	2025/2026	1	\N	2026-08-04
+185	22412615	5	2025/2026	1	\N	2026-08-04
+186	22412615	6	2025/2026	1	\N	2026-08-04
+187	22411009	1	2025/2026	1	\N	2026-08-04
+188	22411009	2	2025/2026	1	\N	2026-08-04
+189	22411009	3	2025/2026	1	\N	2026-08-04
+190	22411009	4	2025/2026	1	\N	2026-08-04
+191	22411009	5	2025/2026	1	\N	2026-08-04
+192	22411009	6	2025/2026	1	\N	2026-08-04
+193	22382547	1	2025/2026	1	\N	2026-08-04
+194	22382547	2	2025/2026	1	\N	2026-08-04
+195	22382547	3	2025/2026	1	\N	2026-08-04
+196	22382547	4	2025/2026	1	\N	2026-08-04
+197	22382547	5	2025/2026	1	\N	2026-08-04
+198	22382547	6	2025/2026	1	\N	2026-08-04
+199	22373317	1	2025/2026	1	\N	2026-08-04
+200	22373317	2	2025/2026	1	\N	2026-08-04
+201	22373317	3	2025/2026	1	\N	2026-08-04
+202	22373317	4	2025/2026	1	\N	2026-08-04
+203	22373317	5	2025/2026	1	\N	2026-08-04
+204	22373317	6	2025/2026	1	\N	2026-08-04
+205	22339058	1	2025/2026	1	\N	2026-08-04
+206	22339058	2	2025/2026	1	\N	2026-08-04
+207	22339058	3	2025/2026	1	\N	2026-08-04
+208	22339058	4	2025/2026	1	\N	2026-08-04
+209	22339058	5	2025/2026	1	\N	2026-08-04
+210	22339058	6	2025/2026	1	\N	2026-08-04
+211	22302628	1	2025/2026	1	\N	2026-08-04
+212	22302628	2	2025/2026	1	\N	2026-08-04
+213	22302628	3	2025/2026	1	\N	2026-08-04
+214	22302628	4	2025/2026	1	\N	2026-08-04
+215	22302628	5	2025/2026	1	\N	2026-08-04
+216	22302628	6	2025/2026	1	\N	2026-08-04
+217	22396566	1	2025/2026	1	\N	2026-08-04
+218	22396566	2	2025/2026	1	\N	2026-08-04
+219	22396566	3	2025/2026	1	\N	2026-08-04
+220	22396566	4	2025/2026	1	\N	2026-08-04
+221	22396566	5	2025/2026	1	\N	2026-08-04
+222	22396566	6	2025/2026	1	\N	2026-08-04
+223	22325819	1	2025/2026	1	\N	2026-08-04
+224	22325819	2	2025/2026	1	\N	2026-08-04
+225	22325819	3	2025/2026	1	\N	2026-08-04
+226	22325819	4	2025/2026	1	\N	2026-08-04
+227	22325819	5	2025/2026	1	\N	2026-08-04
+228	22325819	6	2025/2026	1	\N	2026-08-04
+229	22344703	1	2025/2026	1	\N	2026-08-04
+230	22344703	2	2025/2026	1	\N	2026-08-04
+231	22344703	3	2025/2026	1	\N	2026-08-04
+232	22344703	4	2025/2026	1	\N	2026-08-04
+233	22344703	5	2025/2026	1	\N	2026-08-04
+234	22344703	6	2025/2026	1	\N	2026-08-04
+235	22306910	1	2025/2026	1	\N	2026-08-04
+236	22306910	2	2025/2026	1	\N	2026-08-04
+237	22306910	3	2025/2026	1	\N	2026-08-04
+238	22306910	4	2025/2026	1	\N	2026-08-04
+239	22306910	5	2025/2026	1	\N	2026-08-04
+240	22306910	6	2025/2026	1	\N	2026-08-04
+241	22385472	1	2025/2026	1	\N	2026-08-04
+242	22385472	2	2025/2026	1	\N	2026-08-04
+243	22385472	3	2025/2026	1	\N	2026-08-04
+244	22385472	4	2025/2026	1	\N	2026-08-04
+245	22385472	5	2025/2026	1	\N	2026-08-04
+246	22385472	6	2025/2026	1	\N	2026-08-04
+247	22399214	1	2025/2026	1	\N	2026-08-04
+248	22399214	2	2025/2026	1	\N	2026-08-04
+249	22399214	3	2025/2026	1	\N	2026-08-04
+250	22399214	4	2025/2026	1	\N	2026-08-04
+251	22399214	5	2025/2026	1	\N	2026-08-04
+252	22399214	6	2025/2026	1	\N	2026-08-04
+253	22263126	1	2025/2026	1	\N	2026-08-04
+254	22263126	2	2025/2026	1	\N	2026-08-04
+255	22263126	3	2025/2026	1	\N	2026-08-04
+256	22263126	4	2025/2026	1	\N	2026-08-04
+257	22263126	5	2025/2026	1	\N	2026-08-04
+258	22263126	6	2025/2026	1	\N	2026-08-04
+259	22373463	1	2025/2026	1	\N	2026-08-04
+260	22373463	2	2025/2026	1	\N	2026-08-04
+261	22373463	3	2025/2026	1	\N	2026-08-04
+262	22373463	4	2025/2026	1	\N	2026-08-04
+263	22373463	5	2025/2026	1	\N	2026-08-04
+264	22373463	6	2025/2026	1	\N	2026-08-04
+265	22381702	1	2025/2026	1	\N	2026-08-04
+266	22381702	2	2025/2026	1	\N	2026-08-04
+267	22381702	3	2025/2026	1	\N	2026-08-04
+268	22381702	4	2025/2026	1	\N	2026-08-04
+269	22381702	5	2025/2026	1	\N	2026-08-04
+270	22381702	6	2025/2026	1	\N	2026-08-04
+271	22387846	1	2025/2026	1	\N	2026-08-04
+272	22387846	2	2025/2026	1	\N	2026-08-04
+273	22387846	3	2025/2026	1	\N	2026-08-04
+274	22387846	4	2025/2026	1	\N	2026-08-04
+275	22387846	5	2025/2026	1	\N	2026-08-04
+276	22387846	6	2025/2026	1	\N	2026-08-04
+277	22263922	1	2025/2026	1	\N	2026-08-04
+278	22263922	2	2025/2026	1	\N	2026-08-04
+279	22263922	3	2025/2026	1	\N	2026-08-04
+280	22263922	4	2025/2026	1	\N	2026-08-04
+281	22263922	5	2025/2026	1	\N	2026-08-04
+282	22263922	6	2025/2026	1	\N	2026-08-04
+283	22401641	1	2025/2026	1	\N	2026-08-04
+284	22401641	2	2025/2026	1	\N	2026-08-04
+285	22401641	3	2025/2026	1	\N	2026-08-04
+286	22401641	4	2025/2026	1	\N	2026-08-04
+287	22401641	5	2025/2026	1	\N	2026-08-04
+288	22401641	6	2025/2026	1	\N	2026-08-04
+289	22403781	1	2025/2026	1	\N	2026-08-04
+290	22403781	2	2025/2026	1	\N	2026-08-04
+291	22403781	3	2025/2026	1	\N	2026-08-04
+292	22403781	4	2025/2026	1	\N	2026-08-04
+293	22403781	5	2025/2026	1	\N	2026-08-04
+294	22403781	6	2025/2026	1	\N	2026-08-04
+295	22304260	1	2025/2026	1	\N	2026-08-04
+296	22304260	2	2025/2026	1	\N	2026-08-04
+297	22304260	3	2025/2026	1	\N	2026-08-04
+298	22304260	4	2025/2026	1	\N	2026-08-04
+299	22304260	5	2025/2026	1	\N	2026-08-04
+300	22304260	6	2025/2026	1	\N	2026-08-04
+301	22304013	1	2025/2026	1	\N	2026-08-04
+302	22304013	2	2025/2026	1	\N	2026-08-04
+303	22304013	3	2025/2026	1	\N	2026-08-04
+304	22304013	4	2025/2026	1	\N	2026-08-04
+305	22304013	5	2025/2026	1	\N	2026-08-04
+306	22304013	6	2025/2026	1	\N	2026-08-04
+307	22302188	1	2025/2026	1	\N	2026-08-04
+308	22302188	2	2025/2026	1	\N	2026-08-04
+309	22302188	3	2025/2026	1	\N	2026-08-04
+310	22302188	4	2025/2026	1	\N	2026-08-04
+311	22302188	5	2025/2026	1	\N	2026-08-04
+312	22302188	6	2025/2026	1	\N	2026-08-04
+313	22299949	1	2025/2026	1	\N	2026-08-04
+314	22299949	2	2025/2026	1	\N	2026-08-04
+315	22299949	3	2025/2026	1	\N	2026-08-04
+316	22299949	4	2025/2026	1	\N	2026-08-04
+317	22299949	5	2025/2026	1	\N	2026-08-04
+318	22299949	6	2025/2026	1	\N	2026-08-04
+319	22415339	1	2025/2026	1	\N	2026-08-04
+320	22415339	2	2025/2026	1	\N	2026-08-04
+321	22415339	3	2025/2026	1	\N	2026-08-04
+322	22415339	4	2025/2026	1	\N	2026-08-04
+323	22415339	5	2025/2026	1	\N	2026-08-04
+324	22415339	6	2025/2026	1	\N	2026-08-04
+325	22328334	1	2025/2026	1	\N	2026-08-04
+326	22328334	2	2025/2026	1	\N	2026-08-04
+327	22328334	3	2025/2026	1	\N	2026-08-04
+328	22328334	4	2025/2026	1	\N	2026-08-04
+329	22328334	5	2025/2026	1	\N	2026-08-04
+330	22328334	6	2025/2026	1	\N	2026-08-04
+331	22412982	1	2025/2026	1	\N	2026-08-04
+332	22412982	2	2025/2026	1	\N	2026-08-04
+333	22412982	3	2025/2026	1	\N	2026-08-04
+334	22412982	4	2025/2026	1	\N	2026-08-04
+335	22412982	5	2025/2026	1	\N	2026-08-04
+336	22412982	6	2025/2026	1	\N	2026-08-04
+337	22321110	1	2025/2026	1	\N	2026-08-04
+338	22321110	2	2025/2026	1	\N	2026-08-04
+339	22321110	3	2025/2026	1	\N	2026-08-04
+340	22321110	4	2025/2026	1	\N	2026-08-04
+341	22321110	5	2025/2026	1	\N	2026-08-04
+342	22321110	6	2025/2026	1	\N	2026-08-04
+343	22306021	1	2025/2026	1	\N	2026-08-04
+344	22306021	2	2025/2026	1	\N	2026-08-04
+345	22306021	3	2025/2026	1	\N	2026-08-04
+346	22306021	4	2025/2026	1	\N	2026-08-04
+347	22306021	5	2025/2026	1	\N	2026-08-04
+348	22306021	6	2025/2026	1	\N	2026-08-04
+349	22385391	1	2025/2026	1	\N	2026-08-04
+350	22385391	2	2025/2026	1	\N	2026-08-04
+351	22385391	3	2025/2026	1	\N	2026-08-04
+352	22385391	4	2025/2026	1	\N	2026-08-04
+353	22385391	5	2025/2026	1	\N	2026-08-04
+354	22385391	6	2025/2026	1	\N	2026-08-04
+355	22394866	1	2025/2026	1	\N	2026-08-04
+356	22394866	2	2025/2026	1	\N	2026-08-04
+357	22394866	3	2025/2026	1	\N	2026-08-04
+358	22394866	4	2025/2026	1	\N	2026-08-04
+359	22394866	5	2025/2026	1	\N	2026-08-04
+360	22394866	6	2025/2026	1	\N	2026-08-04
+361	22382601	1	2025/2026	1	\N	2026-08-04
+362	22382601	2	2025/2026	1	\N	2026-08-04
+363	22382601	3	2025/2026	1	\N	2026-08-04
+364	22382601	4	2025/2026	1	\N	2026-08-04
+365	22382601	5	2025/2026	1	\N	2026-08-04
+366	22382601	6	2025/2026	1	\N	2026-08-04
+367	22271867	1	2025/2026	1	\N	2026-08-04
+368	22271867	2	2025/2026	1	\N	2026-08-04
+369	22271867	3	2025/2026	1	\N	2026-08-04
+370	22271867	4	2025/2026	1	\N	2026-08-04
+371	22271867	5	2025/2026	1	\N	2026-08-04
+372	22271867	6	2025/2026	1	\N	2026-08-04
+373	224018189	1	2025/2026	1	\N	2026-08-04
+374	224018189	2	2025/2026	1	\N	2026-08-04
+375	224018189	3	2025/2026	1	\N	2026-08-04
+376	224018189	4	2025/2026	1	\N	2026-08-04
+377	224018189	5	2025/2026	1	\N	2026-08-04
+378	224018189	6	2025/2026	1	\N	2026-08-04
+379	22407018	1	2025/2026	1	\N	2026-08-04
+380	22407018	2	2025/2026	1	\N	2026-08-04
+381	22407018	3	2025/2026	1	\N	2026-08-04
+382	22407018	4	2025/2026	1	\N	2026-08-04
+383	22407018	5	2025/2026	1	\N	2026-08-04
+384	22407018	6	2025/2026	1	\N	2026-08-04
+385	22376708	1	2025/2026	1	\N	2026-08-04
+386	22376708	2	2025/2026	1	\N	2026-08-04
+387	22376708	3	2025/2026	1	\N	2026-08-04
+388	22376708	4	2025/2026	1	\N	2026-08-04
+389	22376708	5	2025/2026	1	\N	2026-08-04
+390	22376708	6	2025/2026	1	\N	2026-08-04
+391	22377537	1	2025/2026	1	\N	2026-08-04
+392	22377537	2	2025/2026	1	\N	2026-08-04
+393	22377537	3	2025/2026	1	\N	2026-08-04
+394	22377537	4	2025/2026	1	\N	2026-08-04
+395	22377537	5	2025/2026	1	\N	2026-08-04
+396	22377537	6	2025/2026	1	\N	2026-08-04
+397	22400543	1	2025/2026	1	\N	2026-08-04
+398	22400543	2	2025/2026	1	\N	2026-08-04
+399	22400543	3	2025/2026	1	\N	2026-08-04
+400	22400543	4	2025/2026	1	\N	2026-08-04
+401	22400543	5	2025/2026	1	\N	2026-08-04
+402	22400543	6	2025/2026	1	\N	2026-08-04
+403	22402666	1	2025/2026	1	\N	2026-08-04
+404	22402666	2	2025/2026	1	\N	2026-08-04
+405	22402666	3	2025/2026	1	\N	2026-08-04
+406	22402666	4	2025/2026	1	\N	2026-08-04
+407	22402666	5	2025/2026	1	\N	2026-08-04
+408	22402666	6	2025/2026	1	\N	2026-08-04
+409	22416112	1	2025/2026	1	\N	2026-08-04
+410	22416112	2	2025/2026	1	\N	2026-08-04
+411	22416112	3	2025/2026	1	\N	2026-08-04
+412	22416112	4	2025/2026	1	\N	2026-08-04
+413	22416112	5	2025/2026	1	\N	2026-08-04
+414	22416112	6	2025/2026	1	\N	2026-08-04
+415	22395074	1	2025/2026	1	\N	2026-08-04
+416	22395074	2	2025/2026	1	\N	2026-08-04
+417	22395074	3	2025/2026	1	\N	2026-08-04
+418	22395074	4	2025/2026	1	\N	2026-08-04
+419	22395074	5	2025/2026	1	\N	2026-08-04
+420	22395074	6	2025/2026	1	\N	2026-08-04
+\.
+
+
+--
+-- Data for Name: lecturer_course_assignment; Type: TABLE DATA; Schema: academic; Owner: postgres
+--
+
+COPY academic.lecturer_course_assignment (assignment_id, lecturer_id, course_id, academic_year, semester) FROM stdin;
+1	1	1	2025/2026	1
+2	2	2	2025/2026	1
+3	3	3	2025/2026	1
+4	4	4	2025/2026	1
+5	5	5	2025/2026	1
+6	6	6	2025/2026	1
+7	1	7	2025/2026	1
+\.
+
+
+--
+-- Data for Name: lecturer_ta_assignment; Type: TABLE DATA; Schema: academic; Owner: postgres
+--
+
+COPY academic.lecturer_ta_assignment (assignment_id, lecturer_id, ta_id, course_id, academic_year) FROM stdin;
+1	1	1	1	2025/2026
+2	1	2	1	2025/2026
+3	3	3	3	2025/2026
+4	2	4	2	2025/2026
+\.
+
+
+--
+-- Data for Name: users; Type: TABLE DATA; Schema: auth; Owner: postgres
+--
+
+COPY auth.users (user_id, student_id, email, password_hash, role, created_at) FROM stdin;
+1	22384451	22384451@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+2	22357814	22357814@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+3	22375367	22375367@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+4	22397756	22397756@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+5	22369321	22369321@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+6	22301848	22301848@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+7	22339520	22339520@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+8	22333597	22333597@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+9	22268986	22268986@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+10	22381577	22381577@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+11	22315830	22315830@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+12	22388189	22388189@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+13	22393520	22393520@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+14	22312110	22312110@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+15	22300896	22300896@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+16	22397491	22397491@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+17	22387715	22387715@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+18	22382302	22382302@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+19	22379061	22379061@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+20	22368809	22368809@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+21	22370498	22370498@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+22	22382425	22382425@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+23	22396551	22396551@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+24	22398562	22398562@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+25	22398596	22398596@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+26	22385323	22385323@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+27	22303421	22303421@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+28	22407033	22407033@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+29	22299189	22299189@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+30	22407837	22407837@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+31	22412615	22412615@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+32	22411009	22411009@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+33	22382547	22382547@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+34	22373317	22373317@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+35	22339058	22339058@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+36	22302628	22302628@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+37	22396566	22396566@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+38	22325819	22325819@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+39	22344703	22344703@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+40	22306910	22306910@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+41	22385472	22385472@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+42	22399214	22399214@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+43	22263126	22263126@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+44	22373463	22373463@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+45	22381702	22381702@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+46	22387846	22387846@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+47	22263922	22263922@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+48	22401641	22401641@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+49	22403781	22403781@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+50	22304260	22304260@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+51	22304013	22304013@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+52	22302188	22302188@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+53	22299949	22299949@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+54	22415339	22415339@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+55	22328334	22328334@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+56	22412982	22412982@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+57	22321110	22321110@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+58	22306021	22306021@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+59	22385391	22385391@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+60	22394866	22394866@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+61	22382601	22382601@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+62	22271867	22271867@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+63	224018189	224018189@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+64	22407018	22407018@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+65	22376708	22376708@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+66	22377537	22377537@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+67	22400543	22400543@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+68	22402666	22402666@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+69	22416112	22416112@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+70	22395074	22395074@st.ug.edu.gh	$2b$10$asgUG9IWE0a9z4cePiOSC.gaYKQ7iEC/mrFlpY.gIzsK13FKi87/G	STUDENT	2026-08-04 21:29:08.458764
+\.
+
+
+--
+-- Data for Name: fee_bills; Type: TABLE DATA; Schema: finance; Owner: postgres
+--
+
+COPY finance.fee_bills (bill_id, student_id, academic_year, semester, description, amount_due, billed_on) FROM stdin;
+1	22384451	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+2	22384451	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+3	22384451	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+4	22357814	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+5	22357814	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+6	22357814	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+7	22375367	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+8	22375367	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+9	22375367	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+10	22397756	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+11	22397756	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+12	22397756	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+13	22369321	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+14	22369321	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+15	22369321	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+16	22301848	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+17	22301848	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+18	22301848	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+19	22339520	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+20	22339520	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+21	22339520	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+22	22333597	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+23	22333597	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+24	22333597	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+25	22268986	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+26	22268986	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+27	22268986	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+28	22381577	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+29	22381577	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+30	22381577	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+31	22315830	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+32	22315830	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+33	22315830	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+34	22388189	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+35	22388189	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+36	22388189	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+37	22393520	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+38	22393520	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+39	22393520	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+40	22312110	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+41	22312110	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+42	22312110	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+43	22300896	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+44	22300896	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+45	22300896	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+46	22397491	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+47	22397491	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+48	22397491	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+49	22387715	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+50	22387715	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+51	22387715	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+52	22382302	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+53	22382302	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+54	22382302	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+55	22379061	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+56	22379061	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+57	22379061	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+58	22368809	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+59	22368809	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+60	22368809	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+61	22370498	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+62	22370498	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+63	22370498	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+64	22382425	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+65	22382425	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+66	22382425	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+67	22396551	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+68	22396551	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+69	22396551	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+70	22398562	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+71	22398562	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+72	22398562	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+73	22398596	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+74	22398596	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+75	22398596	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+76	22385323	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+77	22385323	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+78	22385323	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+79	22303421	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+80	22303421	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+81	22303421	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+82	22407033	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+83	22407033	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+84	22407033	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+85	22299189	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+86	22299189	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+87	22299189	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+88	22407837	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+89	22407837	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+90	22407837	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+91	22412615	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+92	22412615	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+93	22412615	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+94	22411009	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+95	22411009	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+96	22411009	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+97	22382547	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+98	22382547	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+99	22382547	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+100	22373317	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+101	22373317	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+102	22373317	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+103	22339058	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+104	22339058	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+105	22339058	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+106	22302628	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+107	22302628	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+108	22302628	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+109	22396566	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+110	22396566	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+111	22396566	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+112	22325819	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+113	22325819	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+114	22325819	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+115	22344703	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+116	22344703	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+117	22344703	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+118	22306910	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+119	22306910	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+120	22306910	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+121	22385472	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+122	22385472	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+123	22385472	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+124	22399214	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+125	22399214	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+126	22399214	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+127	22263126	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+128	22263126	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+129	22263126	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+130	22373463	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+131	22373463	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+132	22373463	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+133	22381702	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+134	22381702	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+135	22381702	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+136	22387846	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+137	22387846	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+138	22387846	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+139	22263922	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+140	22263922	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+141	22263922	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+142	22401641	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+143	22401641	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+144	22401641	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+145	22403781	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+146	22403781	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+147	22403781	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+148	22304260	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+149	22304260	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+150	22304260	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+151	22304013	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+152	22304013	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+153	22304013	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+154	22302188	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+155	22302188	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+156	22302188	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+157	22299949	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+158	22299949	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+159	22299949	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+160	22415339	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+161	22415339	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+162	22415339	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+163	22328334	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+164	22328334	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+165	22328334	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+166	22412982	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+167	22412982	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+168	22412982	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+169	22321110	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+170	22321110	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+171	22321110	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+172	22306021	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+173	22306021	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+174	22306021	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+175	22385391	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+176	22385391	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+177	22385391	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+178	22394866	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+179	22394866	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+180	22394866	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+181	22382601	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+182	22382601	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+183	22382601	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+184	22271867	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+185	22271867	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+186	22271867	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+187	224018189	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+188	224018189	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+189	224018189	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+190	22407018	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+191	22407018	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+192	22407018	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+193	22376708	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+194	22376708	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+195	22376708	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+196	22377537	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+197	22377537	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+198	22377537	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+199	22400543	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+200	22400543	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+201	22400543	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+202	22402666	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+203	22402666	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+204	22402666	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+205	22416112	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+206	22416112	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+207	22416112	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+208	22395074	2025/2026	1	Tuition Fee	9000.00	2025-01-20
+209	22395074	2025/2026	1	Academic Facility User Fee	2500.00	2025-01-20
+210	22395074	2025/2026	1	SRC & Other Dues	800.00	2025-01-20
+\.
+
+
+--
+-- Data for Name: payments; Type: TABLE DATA; Schema: finance; Owner: postgres
+--
+
+COPY finance.payments (payment_id, student_id, amount, paid_on, method, reference) FROM stdin;
+1	22384451	12300.00	2025-06-22	BANK	PAY-22384451-1
+2	22357814	8000.00	2025-06-17	BANK	PAY-22357814-1
+3	22375367	5000.00	2025-07-02	MOMO	PAY-22375367-1
+4	22397756	7000.00	2025-06-12	BANK	PAY-22397756-1
+5	22397756	5300.00	2025-07-12	MOMO	PAY-22397756-2
+6	22301848	12300.00	2025-06-22	BANK	PAY-22301848-1
+7	22339520	8000.00	2025-06-17	BANK	PAY-22339520-1
+8	22333597	5000.00	2025-07-02	MOMO	PAY-22333597-1
+9	22268986	7000.00	2025-06-12	BANK	PAY-22268986-1
+10	22268986	5300.00	2025-07-12	MOMO	PAY-22268986-2
+11	22315830	12300.00	2025-06-22	BANK	PAY-22315830-1
+12	22388189	8000.00	2025-06-17	BANK	PAY-22388189-1
+13	22393520	5000.00	2025-07-02	MOMO	PAY-22393520-1
+14	22312110	6000.00	2025-06-12	BANK	PAY-22312110-1
+15	22312110	3000.00	2025-07-14	MOMO	PAY-22312110-2
+16	22397491	12300.00	2025-06-22	BANK	PAY-22397491-1
+17	22387715	8000.00	2025-06-17	BANK	PAY-22387715-1
+18	22382302	5000.00	2025-07-02	MOMO	PAY-22382302-1
+19	22379061	7000.00	2025-06-12	BANK	PAY-22379061-1
+20	22379061	5300.00	2025-07-12	MOMO	PAY-22379061-2
+21	22370498	12300.00	2025-06-22	BANK	PAY-22370498-1
+22	22382425	8000.00	2025-06-17	BANK	PAY-22382425-1
+23	22396551	5000.00	2025-07-02	MOMO	PAY-22396551-1
+24	22398562	7000.00	2025-06-12	BANK	PAY-22398562-1
+25	22398562	5300.00	2025-07-12	MOMO	PAY-22398562-2
+26	22385323	12300.00	2025-06-22	BANK	PAY-22385323-1
+27	22303421	8000.00	2025-06-17	BANK	PAY-22303421-1
+28	22407033	5000.00	2025-07-02	MOMO	PAY-22407033-1
+29	22299189	7000.00	2025-06-12	BANK	PAY-22299189-1
+30	22299189	5300.00	2025-07-12	MOMO	PAY-22299189-2
+31	22412615	12300.00	2025-06-22	BANK	PAY-22412615-1
+32	22411009	8000.00	2025-06-17	BANK	PAY-22411009-1
+33	22382547	5000.00	2025-07-02	MOMO	PAY-22382547-1
+34	22373317	7000.00	2025-06-12	BANK	PAY-22373317-1
+35	22373317	5300.00	2025-07-12	MOMO	PAY-22373317-2
+36	22302628	12300.00	2025-06-22	BANK	PAY-22302628-1
+37	22396566	8000.00	2025-06-17	BANK	PAY-22396566-1
+38	22325819	5000.00	2025-07-02	MOMO	PAY-22325819-1
+39	22344703	7000.00	2025-06-12	BANK	PAY-22344703-1
+40	22344703	5300.00	2025-07-12	MOMO	PAY-22344703-2
+41	22385472	12300.00	2025-06-22	BANK	PAY-22385472-1
+42	22399214	8000.00	2025-06-17	BANK	PAY-22399214-1
+43	22263126	5000.00	2025-07-02	MOMO	PAY-22263126-1
+44	22373463	7000.00	2025-06-12	BANK	PAY-22373463-1
+45	22373463	5300.00	2025-07-12	MOMO	PAY-22373463-2
+46	22387846	12300.00	2025-06-22	BANK	PAY-22387846-1
+47	22263922	8000.00	2025-06-17	BANK	PAY-22263922-1
+48	22401641	5000.00	2025-07-02	MOMO	PAY-22401641-1
+49	22403781	7000.00	2025-06-12	BANK	PAY-22403781-1
+50	22403781	5300.00	2025-07-12	MOMO	PAY-22403781-2
+51	22304013	12300.00	2025-06-22	BANK	PAY-22304013-1
+52	22302188	8000.00	2025-06-17	BANK	PAY-22302188-1
+53	22299949	5000.00	2025-07-02	MOMO	PAY-22299949-1
+54	22415339	7000.00	2025-06-12	BANK	PAY-22415339-1
+55	22415339	5300.00	2025-07-12	MOMO	PAY-22415339-2
+56	22412982	12300.00	2025-06-22	BANK	PAY-22412982-1
+57	22321110	8000.00	2025-06-17	BANK	PAY-22321110-1
+58	22306021	5000.00	2025-07-02	MOMO	PAY-22306021-1
+59	22385391	7000.00	2025-06-12	BANK	PAY-22385391-1
+60	22385391	5300.00	2025-07-12	MOMO	PAY-22385391-2
+61	22382601	12300.00	2025-06-22	BANK	PAY-22382601-1
+62	22271867	8000.00	2025-06-17	BANK	PAY-22271867-1
+63	224018189	5000.00	2025-07-02	MOMO	PAY-224018189-1
+64	22407018	7000.00	2025-06-12	BANK	PAY-22407018-1
+65	22407018	5300.00	2025-07-12	MOMO	PAY-22407018-2
+66	22377537	12300.00	2025-06-22	BANK	PAY-22377537-1
+67	22400543	8000.00	2025-06-17	BANK	PAY-22400543-1
+68	22402666	5000.00	2025-07-02	MOMO	PAY-22402666-1
+69	22416112	7000.00	2025-06-12	BANK	PAY-22416112-1
+70	22416112	5300.00	2025-07-12	MOMO	PAY-22416112-2
+\.
+
+
+--
+-- Data for Name: lecturers; Type: TABLE DATA; Schema: people; Owner: postgres
+--
+
+COPY people.lecturers (lecturer_id, staff_no, title, full_name, email, academic_rank, phone) FROM stdin;
+1	LEC001	Prof.	Elsie Adjei	e.adjei@ug.edu.gh	Professor	\N
+2	LEC002	Dr.	Kwame Mensah	k.mensah@ug.edu.gh	Senior Lecturer	\N
+3	LEC003	Dr.	Ama Boateng	a.boateng@ug.edu.gh	Lecturer	\N
+4	LEC004	Dr.	Yaw Owusu	y.owusu@ug.edu.gh	Senior Lecturer	\N
+5	LEC005	Dr.	Efua Danso	e.danso@ug.edu.gh	Lecturer	\N
+6	LEC006	Mr.	Kofi Antwi	k.antwi@ug.edu.gh	Assistant Lecturer	\N
+\.
+
+
+--
+-- Data for Name: programs; Type: TABLE DATA; Schema: people; Owner: postgres
+--
+
+COPY people.programs (program_id, code, name, degree, duration_years) FROM stdin;
+1	BSC-CPEN	BSc Computer Engineering	BSc	4
+\.
+
+
+--
+-- Data for Name: students; Type: TABLE DATA; Schema: people; Owner: postgres
+--
+
+COPY people.students (student_id, full_name, email, phone, date_of_birth, gender, level, program_id, enrolled_on) FROM stdin;
+22384451	Abu Neaquittae Golda	22384451@st.ug.edu.gh	+233240000000	2003-01-01	\N	200	1	2024-08-15
+22357814	Adzasa Stephen Yaw	22357814@st.ug.edu.gh	+233240131071	2003-02-07	\N	200	1	2024-08-15
+22375367	Afia Beaa Osei-Safo	22375367@st.ug.edu.gh	+233240262142	2003-03-16	\N	200	1	2024-08-15
+22397756	Agbemavi Ryan	22397756@st.ug.edu.gh	+233240393213	2003-04-22	\N	200	1	2024-08-15
+22369321	Agormeda Nathaniel Tetteh	22369321@st.ug.edu.gh	+233240524284	2003-05-29	\N	200	1	2024-08-15
+22301848	Ahmad Mohammed Sahih Kayelgu	22301848@st.ug.edu.gh	+233240655355	2003-07-05	\N	200	1	2024-08-15
+22339520	Amprofi Yaa Obeng	22339520@st.ug.edu.gh	+233240786426	2003-08-11	\N	200	1	2024-08-15
+22333597	Asante Esme Lilian	22333597@st.ug.edu.gh	+233240917497	2003-09-17	\N	200	1	2024-08-15
+22268986	Asante Gabriel Kwaku	22268986@st.ug.edu.gh	+233241048568	2003-10-24	\N	200	1	2024-08-15
+22381577	Botchway Daniel	22381577@st.ug.edu.gh	+233241179639	2003-11-30	\N	200	1	2024-08-15
+22315830	Brian Assibey-Yeboah	22315830@st.ug.edu.gh	+233241310710	2004-01-06	\N	200	1	2024-08-15
+22388189	Caleb Mensah	22388189@st.ug.edu.gh	+233241441781	2004-02-12	\N	200	1	2024-08-15
+22393520	Cyril Desmond Ofori	22393520@st.ug.edu.gh	+233241572852	2004-03-20	\N	200	1	2024-08-15
+22312110	David Kwame Odoi-Anim	22312110@st.ug.edu.gh	+233241703923	2004-04-26	\N	200	1	2024-08-15
+22300896	Doe Collins Kweku	22300896@st.ug.edu.gh	+233241834994	2004-06-02	\N	200	1	2024-08-15
+22397491	Douglas Kwaw Adjei	22397491@st.ug.edu.gh	+233241966065	2004-07-09	\N	200	1	2024-08-15
+22387715	Dzidzor Apu Apawudza	22387715@st.ug.edu.gh	+233242097136	2004-08-15	\N	200	1	2024-08-15
+22382302	Edward Kakra Ankrah	22382302@st.ug.edu.gh	+233242228207	2004-09-21	\N	200	1	2024-08-15
+22379061	Emmanuel Akotuah Osae	22379061@st.ug.edu.gh	+233242359278	2004-10-28	\N	200	1	2024-08-15
+22368809	Emmanuel Dery	22368809@st.ug.edu.gh	+233242490349	2004-12-04	\N	200	1	2024-08-15
+22370498	Ethan Edric Kweku Nartey	22370498@st.ug.edu.gh	+233242621420	2003-01-11	\N	200	1	2024-08-15
+22382425	Gilbert Akwasi Sarkodie Yeboah	22382425@st.ug.edu.gh	+233242752491	2003-02-17	\N	200	1	2024-08-15
+22396551	Jerrold Xornam Kyekye	22396551@st.ug.edu.gh	+233242883562	2003-03-26	\N	200	1	2024-08-15
+22398562	Joseph Amankwah	22398562@st.ug.edu.gh	+233243014633	2003-05-02	\N	200	1	2024-08-15
+22398596	Joshua Appiah	22398596@st.ug.edu.gh	+233243145704	2003-06-08	\N	200	1	2024-08-15
+22385323	Jude Gyampoh Addo	22385323@st.ug.edu.gh	+233243276775	2003-07-15	\N	200	1	2024-08-15
+22303421	Kemausuor Winambe Tetteh-Kumah	22303421@st.ug.edu.gh	+233243407846	2003-08-21	\N	200	1	2024-08-15
+22407033	Kenzi Segbefia	22407033@st.ug.edu.gh	+233243538917	2003-09-27	\N	200	1	2024-08-15
+22299189	Kessey Ntiako David	22299189@st.ug.edu.gh	+233243669988	2003-11-03	\N	200	1	2024-08-15
+22407837	Kingsley Caldicock Quartey	22407837@st.ug.edu.gh	+233243801059	2003-12-10	\N	200	1	2024-08-15
+22412615	Kofi Boateng Oware-Tano	22412615@st.ug.edu.gh	+233243932130	2004-01-16	\N	200	1	2024-08-15
+22411009	Kwaku Aninkorah Barimah	22411009@st.ug.edu.gh	+233244063201	2004-02-22	\N	200	1	2024-08-15
+22382547	Kwame Ayeh Obeng	22382547@st.ug.edu.gh	+233244194272	2004-03-30	\N	200	1	2024-08-15
+22373317	Kwamena Kesse Quaicoe	22373317@st.ug.edu.gh	+233244325343	2004-05-06	\N	200	1	2024-08-15
+22339058	Maame Abena Amihere Ahu	22339058@st.ug.edu.gh	+233244456414	2004-06-12	\N	200	1	2024-08-15
+22302628	Maame Araba Grant-Aidoo	22302628@st.ug.edu.gh	+233244587485	2004-07-19	\N	200	1	2024-08-15
+22396566	Manford Kelvin Oppong	22396566@st.ug.edu.gh	+233244718556	2004-08-25	\N	200	1	2024-08-15
+22325819	Nana Adwoa Dansowaah Odoom	22325819@st.ug.edu.gh	+233244849627	2004-10-01	\N	200	1	2024-08-15
+22344703	Nana Anokye	22344703@st.ug.edu.gh	+233244980698	2004-11-07	\N	200	1	2024-08-15
+22306910	Newlove Yeboaah Kwarfo	22306910@st.ug.edu.gh	+233245111769	2004-12-14	\N	200	1	2024-08-15
+22385472	Obeng Ernest Antwi	22385472@st.ug.edu.gh	+233245242840	2003-01-21	\N	200	1	2024-08-15
+22399214	Obeng Ruth	22399214@st.ug.edu.gh	+233245373911	2003-02-27	\N	200	1	2024-08-15
+22263126	Owusu Koranteng Yaw Poku	22263126@st.ug.edu.gh	+233245504982	2003-04-05	\N	200	1	2024-08-15
+22373463	Owusu Nana Boadiwaa	22373463@st.ug.edu.gh	+233245636053	2003-05-12	\N	200	1	2024-08-15
+22381702	Paula Akosua Asiedua Frimpong	22381702@st.ug.edu.gh	+233245767124	2003-06-18	\N	200	1	2024-08-15
+22387846	Quaicoo Emile	22387846@st.ug.edu.gh	+233245898195	2003-07-25	\N	200	1	2024-08-15
+22263922	Romel Alvin Nii Lartey Lartey	22263922@st.ug.edu.gh	+233246029266	2003-08-31	\N	200	1	2024-08-15
+22401641	Sandra Naa Adaku Mettle	22401641@st.ug.edu.gh	+233246160337	2003-10-07	\N	200	1	2024-08-15
+22403781	Sekyere Kofi Bempong	22403781@st.ug.edu.gh	+233246291408	2003-11-13	\N	200	1	2024-08-15
+22304260	Tetteh Christian Edward Nii Mantey	22304260@st.ug.edu.gh	+233246422479	2003-12-20	\N	200	1	2024-08-15
+22304013	Tietaah Sonnu	22304013@st.ug.edu.gh	+233246553550	2004-01-26	\N	200	1	2024-08-15
+22302188	Van Jerry Quansah	22302188@st.ug.edu.gh	+233246684621	2004-03-03	\N	200	1	2024-08-15
+22299949	William Enchill	22299949@st.ug.edu.gh	+233246815692	2004-04-09	\N	200	1	2024-08-15
+22415339	Kelvin Kwesi Saah	22415339@st.ug.edu.gh	+233246946763	2004-05-16	\N	200	1	2024-08-15
+22328334	Etsey Hannah Seyram	22328334@st.ug.edu.gh	+233247077834	2004-06-22	\N	200	1	2024-08-15
+22412982	Adu Mini	22412982@st.ug.edu.gh	+233247208905	2004-07-29	\N	200	1	2024-08-15
+22321110	Gideon Nana Osei Amofa	22321110@st.ug.edu.gh	+233247339976	2004-09-04	\N	200	1	2024-08-15
+22306021	Paul Badu Amponsah	22306021@st.ug.edu.gh	+233247471047	2004-10-11	\N	200	1	2024-08-15
+22385391	Najiib Abdul-Majeed Stephen	22385391@st.ug.edu.gh	+233247602118	2004-11-17	\N	200	1	2024-08-15
+22394866	Joshua Kwame Asirifi	22394866@st.ug.edu.gh	+233247733189	2004-12-24	\N	200	1	2024-08-15
+22382601	Eklou Juliet	22382601@st.ug.edu.gh	+233247864260	2003-01-31	\N	200	1	2024-08-15
+22271867	De-Andra Rebecca Ayebo	22271867@st.ug.edu.gh	+233247995331	2003-03-09	\N	200	1	2024-08-15
+224018189	Mas'ud Nasir	224018189@st.ug.edu.gh	+233248126402	2003-04-15	\N	200	1	2024-08-15
+22407018	Daniel Dwomoh Frimpong	22407018@st.ug.edu.gh	+233248257473	2003-05-22	\N	200	1	2024-08-15
+22376708	Adjei Priscilla	22376708@st.ug.edu.gh	+233248388544	2003-06-28	\N	200	1	2024-08-15
+22377537	Reuben Adomako	22377537@st.ug.edu.gh	+233248519615	2003-08-04	\N	200	1	2024-08-15
+22400543	Ocansey Frederick	22400543@st.ug.edu.gh	+233248650686	2003-09-10	\N	200	1	2024-08-15
+22402666	Dogbatse Darlington	22402666@st.ug.edu.gh	+233248781757	2003-10-17	\N	200	1	2024-08-15
+22416112	Troy Thomas	22416112@st.ug.edu.gh	+233248912828	2003-11-23	\N	200	1	2024-08-15
+22395074	Lydia Tiwaah	22395074@st.ug.edu.gh	+233240043899	2003-12-30	\N	200	1	2024-08-15
+\.
+
+
+--
+-- Data for Name: teaching_assistants; Type: TABLE DATA; Schema: people; Owner: postgres
+--
+
+COPY people.teaching_assistants (ta_id, full_name, email, student_id) FROM stdin;
+1	Nana Kwabena Asare	n.asare.ta@st.ug.edu.gh	22384451
+2	Akosua Frimpong	a.frimpong.ta@st.ug.edu.gh	22357814
+3	Selorm Agbeko	s.agbeko.ta@st.ug.edu.gh	\N
+4	Linda Ofori	l.ofori.ta@st.ug.edu.gh	\N
+\.
+
+
+--
+-- Name: courses_course_id_seq; Type: SEQUENCE SET; Schema: academic; Owner: postgres
+--
+
+SELECT pg_catalog.setval('academic.courses_course_id_seq', 7, true);
+
+
+--
+-- Name: enrollments_enrollment_id_seq; Type: SEQUENCE SET; Schema: academic; Owner: postgres
+--
+
+SELECT pg_catalog.setval('academic.enrollments_enrollment_id_seq', 420, true);
+
+
+--
+-- Name: lecturer_course_assignment_assignment_id_seq; Type: SEQUENCE SET; Schema: academic; Owner: postgres
+--
+
+SELECT pg_catalog.setval('academic.lecturer_course_assignment_assignment_id_seq', 7, true);
+
+
+--
+-- Name: lecturer_ta_assignment_assignment_id_seq; Type: SEQUENCE SET; Schema: academic; Owner: postgres
+--
+
+SELECT pg_catalog.setval('academic.lecturer_ta_assignment_assignment_id_seq', 4, true);
+
+
+--
+-- Name: users_user_id_seq; Type: SEQUENCE SET; Schema: auth; Owner: postgres
+--
+
+SELECT pg_catalog.setval('auth.users_user_id_seq', 70, true);
+
+
+--
+-- Name: fee_bills_bill_id_seq; Type: SEQUENCE SET; Schema: finance; Owner: postgres
+--
+
+SELECT pg_catalog.setval('finance.fee_bills_bill_id_seq', 210, true);
+
+
+--
+-- Name: payments_payment_id_seq; Type: SEQUENCE SET; Schema: finance; Owner: postgres
+--
+
+SELECT pg_catalog.setval('finance.payments_payment_id_seq', 70, true);
+
+
+--
+-- Name: lecturers_lecturer_id_seq; Type: SEQUENCE SET; Schema: people; Owner: postgres
+--
+
+SELECT pg_catalog.setval('people.lecturers_lecturer_id_seq', 6, true);
+
+
+--
+-- Name: programs_program_id_seq; Type: SEQUENCE SET; Schema: people; Owner: postgres
+--
+
+SELECT pg_catalog.setval('people.programs_program_id_seq', 1, true);
+
+
+--
+-- Name: teaching_assistants_ta_id_seq; Type: SEQUENCE SET; Schema: people; Owner: postgres
+--
+
+SELECT pg_catalog.setval('people.teaching_assistants_ta_id_seq', 4, true);
+
+
+--
+-- Name: courses courses_code_key; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.courses
+    ADD CONSTRAINT courses_code_key UNIQUE (code);
+
+
+--
+-- Name: courses courses_pkey; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.courses
+    ADD CONSTRAINT courses_pkey PRIMARY KEY (course_id);
+
+
+--
+-- Name: enrollments enrollments_pkey; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.enrollments
+    ADD CONSTRAINT enrollments_pkey PRIMARY KEY (enrollment_id);
+
+
+--
+-- Name: enrollments enrollments_student_id_course_id_academic_year_semester_key; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.enrollments
+    ADD CONSTRAINT enrollments_student_id_course_id_academic_year_semester_key UNIQUE (student_id, course_id, academic_year, semester);
+
+
+--
+-- Name: lecturer_course_assignment lecturer_course_assignment_lecturer_id_course_id_academic_y_key; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_course_assignment
+    ADD CONSTRAINT lecturer_course_assignment_lecturer_id_course_id_academic_y_key UNIQUE (lecturer_id, course_id, academic_year, semester);
+
+
+--
+-- Name: lecturer_course_assignment lecturer_course_assignment_pkey; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_course_assignment
+    ADD CONSTRAINT lecturer_course_assignment_pkey PRIMARY KEY (assignment_id);
+
+
+--
+-- Name: lecturer_ta_assignment lecturer_ta_assignment_lecturer_id_ta_id_course_id_academic_key; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_ta_assignment
+    ADD CONSTRAINT lecturer_ta_assignment_lecturer_id_ta_id_course_id_academic_key UNIQUE (lecturer_id, ta_id, course_id, academic_year);
+
+
+--
+-- Name: lecturer_ta_assignment lecturer_ta_assignment_pkey; Type: CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_ta_assignment
+    ADD CONSTRAINT lecturer_ta_assignment_pkey PRIMARY KEY (assignment_id);
+
+
+--
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: auth; Owner: postgres
+--
+
+ALTER TABLE ONLY auth.users
+    ADD CONSTRAINT users_email_key UNIQUE (email);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: auth; Owner: postgres
+--
+
+ALTER TABLE ONLY auth.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: users users_student_id_key; Type: CONSTRAINT; Schema: auth; Owner: postgres
+--
+
+ALTER TABLE ONLY auth.users
+    ADD CONSTRAINT users_student_id_key UNIQUE (student_id);
+
+
+--
+-- Name: fee_bills fee_bills_pkey; Type: CONSTRAINT; Schema: finance; Owner: postgres
+--
+
+ALTER TABLE ONLY finance.fee_bills
+    ADD CONSTRAINT fee_bills_pkey PRIMARY KEY (bill_id);
+
+
+--
+-- Name: payments payments_pkey; Type: CONSTRAINT; Schema: finance; Owner: postgres
+--
+
+ALTER TABLE ONLY finance.payments
+    ADD CONSTRAINT payments_pkey PRIMARY KEY (payment_id);
+
+
+--
+-- Name: lecturers lecturers_email_key; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.lecturers
+    ADD CONSTRAINT lecturers_email_key UNIQUE (email);
+
+
+--
+-- Name: lecturers lecturers_pkey; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.lecturers
+    ADD CONSTRAINT lecturers_pkey PRIMARY KEY (lecturer_id);
+
+
+--
+-- Name: lecturers lecturers_staff_no_key; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.lecturers
+    ADD CONSTRAINT lecturers_staff_no_key UNIQUE (staff_no);
+
+
+--
+-- Name: programs programs_code_key; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.programs
+    ADD CONSTRAINT programs_code_key UNIQUE (code);
+
+
+--
+-- Name: programs programs_pkey; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.programs
+    ADD CONSTRAINT programs_pkey PRIMARY KEY (program_id);
+
+
+--
+-- Name: students students_email_key; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.students
+    ADD CONSTRAINT students_email_key UNIQUE (email);
+
+
+--
+-- Name: students students_pkey; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.students
+    ADD CONSTRAINT students_pkey PRIMARY KEY (student_id);
+
+
+--
+-- Name: teaching_assistants teaching_assistants_email_key; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.teaching_assistants
+    ADD CONSTRAINT teaching_assistants_email_key UNIQUE (email);
+
+
+--
+-- Name: teaching_assistants teaching_assistants_pkey; Type: CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.teaching_assistants
+    ADD CONSTRAINT teaching_assistants_pkey PRIMARY KEY (ta_id);
+
+
+--
+-- Name: idx_enrollments_student; Type: INDEX; Schema: academic; Owner: postgres
+--
+
+CREATE INDEX idx_enrollments_student ON academic.enrollments USING btree (student_id);
+
+
+--
+-- Name: idx_fee_bills_student; Type: INDEX; Schema: finance; Owner: postgres
+--
+
+CREATE INDEX idx_fee_bills_student ON finance.fee_bills USING btree (student_id);
+
+
+--
+-- Name: idx_payments_student; Type: INDEX; Schema: finance; Owner: postgres
+--
+
+CREATE INDEX idx_payments_student ON finance.payments USING btree (student_id);
+
+
+--
+-- Name: enrollments enrollments_course_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.enrollments
+    ADD CONSTRAINT enrollments_course_id_fkey FOREIGN KEY (course_id) REFERENCES academic.courses(course_id);
+
+
+--
+-- Name: enrollments enrollments_student_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.enrollments
+    ADD CONSTRAINT enrollments_student_id_fkey FOREIGN KEY (student_id) REFERENCES people.students(student_id);
+
+
+--
+-- Name: lecturer_course_assignment lecturer_course_assignment_course_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_course_assignment
+    ADD CONSTRAINT lecturer_course_assignment_course_id_fkey FOREIGN KEY (course_id) REFERENCES academic.courses(course_id);
+
+
+--
+-- Name: lecturer_course_assignment lecturer_course_assignment_lecturer_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_course_assignment
+    ADD CONSTRAINT lecturer_course_assignment_lecturer_id_fkey FOREIGN KEY (lecturer_id) REFERENCES people.lecturers(lecturer_id);
+
+
+--
+-- Name: lecturer_ta_assignment lecturer_ta_assignment_course_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_ta_assignment
+    ADD CONSTRAINT lecturer_ta_assignment_course_id_fkey FOREIGN KEY (course_id) REFERENCES academic.courses(course_id);
+
+
+--
+-- Name: lecturer_ta_assignment lecturer_ta_assignment_lecturer_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_ta_assignment
+    ADD CONSTRAINT lecturer_ta_assignment_lecturer_id_fkey FOREIGN KEY (lecturer_id) REFERENCES people.lecturers(lecturer_id);
+
+
+--
+-- Name: lecturer_ta_assignment lecturer_ta_assignment_ta_id_fkey; Type: FK CONSTRAINT; Schema: academic; Owner: postgres
+--
+
+ALTER TABLE ONLY academic.lecturer_ta_assignment
+    ADD CONSTRAINT lecturer_ta_assignment_ta_id_fkey FOREIGN KEY (ta_id) REFERENCES people.teaching_assistants(ta_id);
+
+
+--
+-- Name: users users_student_id_fkey; Type: FK CONSTRAINT; Schema: auth; Owner: postgres
+--
+
+ALTER TABLE ONLY auth.users
+    ADD CONSTRAINT users_student_id_fkey FOREIGN KEY (student_id) REFERENCES people.students(student_id);
+
+
+--
+-- Name: fee_bills fee_bills_student_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: postgres
+--
+
+ALTER TABLE ONLY finance.fee_bills
+    ADD CONSTRAINT fee_bills_student_id_fkey FOREIGN KEY (student_id) REFERENCES people.students(student_id);
+
+
+--
+-- Name: payments payments_student_id_fkey; Type: FK CONSTRAINT; Schema: finance; Owner: postgres
+--
+
+ALTER TABLE ONLY finance.payments
+    ADD CONSTRAINT payments_student_id_fkey FOREIGN KEY (student_id) REFERENCES people.students(student_id);
+
+
+--
+-- Name: students students_program_id_fkey; Type: FK CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.students
+    ADD CONSTRAINT students_program_id_fkey FOREIGN KEY (program_id) REFERENCES people.programs(program_id);
+
+
+--
+-- Name: teaching_assistants teaching_assistants_student_id_fkey; Type: FK CONSTRAINT; Schema: people; Owner: postgres
+--
+
+ALTER TABLE ONLY people.teaching_assistants
+    ADD CONSTRAINT teaching_assistants_student_id_fkey FOREIGN KEY (student_id) REFERENCES people.students(student_id);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict pdy11iDIhsnnESQWhWhuVR2MLYqSauJVzXGuwwB5xDt3dsrksUjUqYXrgwLAhT2
+
