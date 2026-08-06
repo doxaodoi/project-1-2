@@ -16,12 +16,14 @@ public class UserRepository {
         this.jdbc = jdbc;
     }
 
-    /** A login account row. */
-    public record UserRow(long userId, long studentId, String email, String passwordHash, String role) {}
+    /** A login account row. studentId is null for admin accounts. */
+    public record UserRow(long userId, Long studentId, String fullName,
+                          String email, String passwordHash, String role) {}
 
     private static final RowMapper<UserRow> MAPPER = (rs, i) -> new UserRow(
             rs.getLong("user_id"),
-            rs.getLong("student_id"),
+            rs.getObject("student_id", Long.class),
+            rs.getString("full_name"),
             rs.getString("email"),
             rs.getString("password_hash"),
             rs.getString("role")
@@ -29,7 +31,8 @@ public class UserRepository {
 
     public Optional<UserRow> findByEmail(String email) {
         List<UserRow> rows = jdbc.query(
-                "SELECT user_id, student_id, email, password_hash, role FROM auth.users WHERE email = ?",
+                "SELECT user_id, student_id, full_name, email, password_hash, role " +
+                "FROM auth.users WHERE email = ?",
                 MAPPER, email);
         return rows.stream().findFirst();
     }

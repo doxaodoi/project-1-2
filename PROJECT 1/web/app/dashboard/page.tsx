@@ -4,16 +4,17 @@ import { apiGet, ApiError } from "@/lib/api";
 import { requireToken } from "@/lib/session";
 import type { Me } from "@/lib/types";
 import Nav from "@/app/components/Nav";
+import { IconUser, IconCard, IconClipboard, IconCap, IconUsers } from "@/app/components/icons";
 
 const money = (n: number) =>
   new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS" }).format(n);
 
 const FEATURES = [
-  { href: "/profile", title: "Personal Information", desc: "View and update your contact details.", icon: "👤" },
-  { href: "/fees", title: "Fees & Payments", desc: "See your statement and make a payment.", icon: "💳" },
-  { href: "/registration", title: "Course Registration", desc: "Register or drop courses this semester.", icon: "📝" },
-  { href: "/grades", title: "Grades / Results", desc: "Your results for completed courses.", icon: "🎓" },
-  { href: "/assignments", title: "Lecturers & TAs", desc: "Who teaches what, and TA assignments.", icon: "🧑‍🏫" },
+  { href: "/profile", title: "Personal Information", desc: "View and update your contact details.", Icon: IconUser },
+  { href: "/fees", title: "Fees & Payments", desc: "See your statement and make a payment.", Icon: IconCard },
+  { href: "/registration", title: "Course Registration", desc: "Register or drop courses this semester.", Icon: IconClipboard },
+  { href: "/grades", title: "Grades / Results", desc: "Your results for completed courses.", Icon: IconCap },
+  { href: "/assignments", title: "Lecturers & TAs", desc: "Who teaches what, and TA assignments.", Icon: IconUsers },
 ];
 
 export default async function DashboardPage() {
@@ -59,8 +60,10 @@ export default async function DashboardPage() {
                 href={f.href}
                 className="group rounded-xl border border-slate-200 bg-white p-5 hover:border-brand hover:shadow-sm transition"
               >
-                <div className="text-2xl">{f.icon}</div>
-                <h3 className="mt-2 font-semibold text-slate-800 group-hover:text-brand">{f.title}</h3>
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand group-hover:bg-brand group-hover:text-white transition">
+                  <f.Icon className="h-5 w-5" />
+                </span>
+                <h3 className="mt-3 font-semibold text-slate-800 group-hover:text-brand">{f.title}</h3>
                 <p className="mt-1 text-sm text-slate-500">{f.desc}</p>
               </Link>
             ))}

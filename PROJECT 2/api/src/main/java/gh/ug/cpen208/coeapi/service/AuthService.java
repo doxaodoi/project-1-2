@@ -55,7 +55,7 @@ public class AuthService {
 
         StudentDto dto = students.findById(studentId)
                 .orElseThrow(() -> ApiException.badRequest("Could not create student"));
-        return new AuthResponse(jwt.generateToken(studentId, email), dto);
+        return new AuthResponse(jwt.generateToken(studentId, email, "STUDENT"), "STUDENT", dto.fullName(), dto);
     }
 
     public AuthResponse login(LoginRequest req) {
@@ -67,8 +67,16 @@ public class AuthService {
         if (!encoder.matches(password, user.passwordHash())) {
             throw ApiException.unauthorized("Invalid email or password");
         }
+
+        // Admin accounts have no student profile; the token's subject is 0.
+        if ("ADMIN".equals(user.role())) {
+            String name = user.fullName() == null ? "Administrator" : user.fullName();
+            return new AuthResponse(jwt.generateToken(0L, user.email(), "ADMIN"), "ADMIN", name, null);
+        }
+
         StudentDto dto = students.findById(user.studentId())
                 .orElseThrow(() -> ApiException.notFound("Student profile not found"));
-        return new AuthResponse(jwt.generateToken(user.studentId(), user.email()), dto);
+        return new AuthResponse(jwt.generateToken(user.studentId(), user.email(), "STUDENT"),
+                "STUDENT", dto.fullName(), dto);
     }
 }

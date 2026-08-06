@@ -8,6 +8,7 @@ import gh.ug.cpen208.coeapi.dto.PaymentDto;
 import gh.ug.cpen208.coeapi.dto.PaymentRequest;
 import gh.ug.cpen208.coeapi.dto.StudentDto;
 import gh.ug.cpen208.coeapi.dto.UpdateProfileRequest;
+import gh.ug.cpen208.coeapi.error.ApiException;
 import gh.ug.cpen208.coeapi.security.JwtAuthFilter;
 import gh.ug.cpen208.coeapi.service.StudentService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,6 +32,9 @@ public class MeController {
     }
 
     private static long currentId(HttpServletRequest request) {
+        if (!"STUDENT".equals(request.getAttribute(JwtAuthFilter.ATTR_ROLE))) {
+            throw ApiException.forbidden("Student access required");
+        }
         return (Long) request.getAttribute(JwtAuthFilter.ATTR_STUDENT_ID);
     }
 

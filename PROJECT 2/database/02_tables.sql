@@ -154,12 +154,15 @@ CREATE TABLE finance.payments (
 -- ---------------------------------------------------------------------
 -- auth.users : login accounts consumed by the API / frontend
 -- ---------------------------------------------------------------------
+-- student_id is NULL for staff/admin accounts (they are not students);
+-- full_name holds an admin's display name (students resolve theirs from people.students).
 CREATE TABLE auth.users (
     user_id         SERIAL        PRIMARY KEY,
-    student_id      BIGINT        NOT NULL UNIQUE REFERENCES people.students(student_id),
+    student_id      BIGINT        UNIQUE REFERENCES people.students(student_id),
+    full_name       VARCHAR(150),
     email           VARCHAR(150)  NOT NULL UNIQUE,
     password_hash   VARCHAR(100)  NOT NULL,
-    role            VARCHAR(20)   NOT NULL DEFAULT 'STUDENT',
+    role            VARCHAR(20)   NOT NULL DEFAULT 'STUDENT' CHECK (role IN ('STUDENT', 'ADMIN')),
     created_at      TIMESTAMP     NOT NULL DEFAULT NOW()
 );
 

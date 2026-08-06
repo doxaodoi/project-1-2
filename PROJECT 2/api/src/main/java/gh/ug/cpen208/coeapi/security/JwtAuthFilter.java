@@ -20,6 +20,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     public static final String ATTR_STUDENT_ID = "authStudentId";
     public static final String ATTR_EMAIL = "authEmail";
+    public static final String ATTR_ROLE = "authRole";
 
     private final JwtUtil jwtUtil;
 
@@ -49,6 +50,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             JwtUtil.Claims claims = jwtUtil.validate(header.substring(7).trim());
             request.setAttribute(ATTR_STUDENT_ID, claims.studentId());
             request.setAttribute(ATTR_EMAIL, claims.email());
+            request.setAttribute(ATTR_ROLE, claims.role());
         } catch (JwtUtil.JwtException e) {
             unauthorized(response, e.getMessage());
             return;

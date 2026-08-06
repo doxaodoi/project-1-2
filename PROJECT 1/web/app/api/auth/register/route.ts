@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiPost, ApiError } from "@/lib/api";
-import { AUTH_COOKIE } from "@/lib/config";
+import { AUTH_COOKIE, ROLE_COOKIE } from "@/lib/config";
 import type { AuthResult } from "@/lib/types";
 
 // Proxies registration to the Spring Boot API and logs the user in by storing
@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       path: "/",
       maxAge: 60 * 60 * 2,
     });
+    res.cookies.set(ROLE_COOKIE, result.role, { sameSite: "lax", path: "/", maxAge: 60 * 60 * 2 });
     return res;
   } catch (e) {
     if (e instanceof ApiError) {

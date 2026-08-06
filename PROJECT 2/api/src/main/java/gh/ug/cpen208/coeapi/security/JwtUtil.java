@@ -37,14 +37,15 @@ public class JwtUtil {
         this.expiryMillis = expiryMinutes * 60_000L;
     }
 
-    /** Immutable view of the token's identity claims. */
-    public record Claims(long studentId, String email) {}
+    /** Immutable view of the token's identity claims. studentId is 0 for non-student (admin) tokens. */
+    public record Claims(long studentId, String email, String role) {}
 
-    public String generateToken(long studentId, String email) {
+    public String generateToken(long studentId, String email, String role) {
         long now = System.currentTimeMillis() / 1000L;
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sub", String.valueOf(studentId));
         payload.put("email", email);
+        payload.put("role", role);
         payload.put("iat", now);
         payload.put("exp", now + expiryMillis / 1000L);
 
@@ -82,7 +83,9 @@ public class JwtUtil {
         }
         long studentId = Long.parseLong(String.valueOf(payload.get("sub")));
         String email = String.valueOf(payload.get("email"));
-        return new Claims(studentId, email);
+        Object roleClaim = payload.get("role");
+        String role = roleClaim == null ? "STUDENT" : String.valueOf(roleClaim);
+        return new Claims(studentId, email, role);
     }
 
     private String encode(byte[] bytes) {

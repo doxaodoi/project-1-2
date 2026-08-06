@@ -43,7 +43,7 @@ export default function PayForm({ outstanding }: { outstanding: number }) {
 
       {paidUp ? (
         <p className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
-          Your fees are fully paid — nothing outstanding. 🎉
+          Your fees are fully paid — nothing outstanding.
         </p>
       ) : (
         <form onSubmit={onSubmit} className="mt-4 flex flex-wrap items-end gap-4">

@@ -61,9 +61,54 @@ export interface LecturerTa {
   academicYear: string;
 }
 
+// ---- admin ----
+export interface AdminStudent {
+  studentId: number;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  level: number;
+  totalBilled: number;
+  totalPaid: number;
+  outstanding: number;
+}
+
+export interface Option {
+  id: number;
+  label: string;
+}
+
+export interface LecturerCourseRow {
+  assignmentId: number;
+  courseCode: string;
+  courseTitle: string;
+  lecturer: string;
+  academicYear: string;
+  semester: number;
+}
+
+export interface LecturerTaRow {
+  assignmentId: number;
+  lecturer: string;
+  ta: string;
+  courseCode: string;
+  academicYear: string;
+}
+
+export interface AdminCourse {
+  courseId: number;
+  code: string;
+  title: string;
+  creditHours: number;
+  level: number;
+  semester: number;
+}
+
 export interface AuthResult {
   token: string;
-  student: Student;
+  role: "STUDENT" | "ADMIN";
+  displayName: string;
+  student: Student | null;
 }
 
 export interface Me {
