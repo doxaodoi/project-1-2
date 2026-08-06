@@ -67,9 +67,10 @@ npm run dev
 Open `http://localhost:3000`.
 
 ## Demo logins
-Every seeded student can sign in with the password **`Student@123`**, using the
-email `<studentID>@st.ug.edu.gh` — e.g. `22312110@st.ug.edu.gh`.
-You can also register a brand-new account from the Register page.
+- **Student** — email `<studentID>@st.ug.edu.gh` (e.g. `22312110@st.ug.edu.gh`), password **`Student@123`**
+  (every seeded student uses this). You can also register a brand-new account from the Register page.
+- **Department admin** — `admin@coe.ug.edu.gh`, password **`Admin@123`**. Signs in to the admin console
+  (class roster + fees, lecturer→course and lecturer→TA assignments, add courses).
 
 ## Tech stack
 | Layer | Technology |
