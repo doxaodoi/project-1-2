@@ -36,6 +36,31 @@ export interface Payment {
   reference: string | null;
 }
 
+export interface Course {
+  courseId: number;
+  courseCode: string;
+  courseTitle: string;
+  creditHours: number;
+  lecturer: string;
+  academicYear: string;
+  semester: number;
+}
+
+export interface LecturerCourse {
+  courseCode: string;
+  courseTitle: string;
+  lecturer: string;
+  academicYear: string;
+  semester: number;
+}
+
+export interface LecturerTa {
+  lecturer: string;
+  ta: string;
+  courseCode: string;
+  academicYear: string;
+}
+
 export interface AuthResult {
   token: string;
   student: Student;

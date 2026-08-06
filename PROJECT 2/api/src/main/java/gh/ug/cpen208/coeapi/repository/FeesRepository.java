@@ -61,6 +61,15 @@ public class FeesRepository {
         return jdbc.queryForObject("SELECT finance.get_outstanding_fees()::text", String.class);
     }
 
+    /** Records a fee payment (functionality 2) and returns the created row. */
+    public PaymentDto insertPayment(long studentId, java.math.BigDecimal amount, String method) {
+        String sql =
+                "INSERT INTO finance.payments (student_id, amount, method, reference) " +
+                "VALUES (?, ?, ?, 'PAY-' || ? || '-' || to_char(now(), 'YYYYMMDDHH24MISS')) " +
+                "RETURNING payment_id, amount, paid_on, method, reference";
+        return jdbc.queryForObject(sql, PAYMENT_MAPPER, studentId, amount, method, studentId);
+    }
+
     /** Gives a freshly-registered student a starter tuition bill so their dashboard is meaningful. */
     public void insertStarterBill(long studentId) {
         jdbc.update(

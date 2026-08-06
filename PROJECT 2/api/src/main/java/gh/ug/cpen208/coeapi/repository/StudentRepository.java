@@ -52,4 +52,11 @@ public class StudentRepository {
                 "VALUES (?, ?, ?, 200, 1, CURRENT_DATE)",
                 studentId, fullName, email);
     }
+
+    /** Updates a student's editable contact details (functionality 1). */
+    public void updateContact(long studentId, String email, String phone) {
+        jdbc.update(
+                "UPDATE people.students SET email = ?, phone = ? WHERE student_id = ?",
+                email, phone, studentId);
+    }
 }

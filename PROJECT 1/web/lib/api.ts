@@ -30,6 +30,28 @@ export async function apiGet<T>(path: string, token: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Authenticated write (PUT/POST/DELETE) against the API using the caller's JWT. Server-side only. */
+export async function apiSend<T>(
+  path: string,
+  method: "POST" | "PUT" | "DELETE",
+  token: string,
+  body?: unknown,
+): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await parseError(res));
+  }
+  return res.json() as Promise<T>;
+}
+
 /** Unauthenticated POST (used by the login/register route handlers). */
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
