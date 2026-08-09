@@ -1,0 +1,57 @@
+# =====================================================================
+# CPEN 208 Projects 1 & 2 - full stack in one command:  docker compose up
+#   db   -> PostgreSQL, auto-builds the coe_dept schema + seed on first run
+#   api  -> Spring Boot service (Project 2)   http://localhost:8080
+#   web  -> Next.js 14 frontend (Project 1)   http://localhost:3000
+# The database password here is self-contained to the containers.
+# =====================================================================
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: coe_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: coe_dept_pw
+      POSTGRES_DB: coe_dept
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Postgres runs these in name order on first start (against coe_dept).
+      # 00_create_database.sql is intentionally omitted (the image creates the DB).
+      - "./PROJECT 1/database/01_schemas.sql:/docker-entrypoint-initdb.d/01_schemas.sql:ro"
+      - "./PROJECT 1/database/02_tables.sql:/docker-entrypoint-initdb.d/02_tables.sql:ro"
+      - "./PROJECT 1/database/03_functions.sql:/docker-entrypoint-initdb.d/03_functions.sql:ro"
+      - "./PROJECT 1/database/04_seed.sql:/docker-entrypoint-initdb.d/04_seed.sql:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d coe_dept"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: "./PROJECT 2/api"
+    container_name: coe_api
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/coe_dept
+      DB_PASSWORD: coe_dept_pw
+      FRONTEND_ORIGIN: http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: "./PROJECT 1/web"
+    container_name: coe_web
+    environment:
+      # The Next.js server reaches the API over the compose network by service name.
+      API_BASE_URL: http://api:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

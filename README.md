@@ -31,7 +31,20 @@ which runs the Project 1 SQL (including the `finance.get_outstanding_fees()`
 function) via `JdbcTemplate`. Authentication is custom: **BCrypt** password
 hashing + a **JWT** stored in an HttpOnly cookie.
 
-## Prerequisites
+## Quick start with Docker (whole stack, one command)
+With Docker Desktop running, from the repo root:
+```bash
+docker compose up --build
+```
+This starts three containers — **db** (PostgreSQL, which auto-builds the `coe_dept`
+schema and seed data on first run from `PROJECT 1/database/01–04`), **api** (Spring
+Boot, http://localhost:8080), and **web** (Next.js, http://localhost:3000). Open
+http://localhost:3000 and sign in with the demo logins below. Stop with `Ctrl+C`;
+`docker compose down -v` also removes the database volume for a clean slate.
+
+The manual steps below are the alternative if you prefer not to use Docker.
+
+## Prerequisites (manual setup)
 - PostgreSQL 16+ (managed with pgAdmin) — a `postgres` superuser
 - Java 21 + Maven (the API also runs from an IDE)
 - Node.js 18+ / npm
